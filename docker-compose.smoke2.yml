@@ -1,0 +1,14 @@
+# Complementary smoke run: verify the Elasticsearch + Parquet(MinIO) sinks
+# actually receive Flink output. Timescale off this time to keep RAM in budget.
+services:
+  kafka:
+    environment:
+      KAFKA_HEAP_OPTS: "-Xms512m -Xmx512m"
+  elasticsearch:
+    environment:
+      - "ES_JAVA_OPTS=-Xms640m -Xmx640m"
+  flink-jobmanager:
+    environment:
+      ENABLE_ES: "true"
+      ENABLE_PARQUET: "true"
+      ENABLE_TIMESCALE: "false"

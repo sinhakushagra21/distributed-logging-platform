@@ -1,0 +1,91 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "title": "Fleet Observability — error rate & latency",
+  "uid": "fleet-observability",
+  "tags": ["observability", "flink", "timescaledb"],
+  "timezone": "",
+  "schemaVersion": 39,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "10s",
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Error rate % by service (tumbling 1m)",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": { "type": "postgres", "uid": "timescaledb" },
+          "rawSql": "SELECT window_start AS \"time\", service_name AS metric, error_rate*100 AS value FROM service_metrics WHERE window_type='tumbling_1m' AND $__timeFilter(window_start) ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Avg latency (ms) by service (tumbling 1m)",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": { "type": "postgres", "uid": "timescaledb" },
+          "rawSql": "SELECT window_start AS \"time\", service_name AS metric, avg_latency_ms AS value FROM service_metrics WHERE window_type='tumbling_1m' AND $__timeFilter(window_start) ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Request count by service (tumbling 1m)",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 9 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "fillOpacity": 40 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": { "type": "postgres", "uid": "timescaledb" },
+          "rawSql": "SELECT window_start AS \"time\", service_name AS metric, count AS value FROM service_metrics WHERE window_type='tumbling_1m' AND $__timeFilter(window_start) ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Moving error rate % (sliding 1m/10s)",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 9 },
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "custom": { "drawStyle": "line", "fillOpacity": 5, "lineInterpolation": "smooth" } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": { "type": "postgres", "uid": "timescaledb" },
+          "rawSql": "SELECT window_start AS \"time\", service_name AS metric, error_rate*100 AS value FROM service_metrics WHERE window_type='sliding_1m_10s' AND $__timeFilter(window_start) ORDER BY 1"
+        }
+      ]
+    }
+  ]
+}

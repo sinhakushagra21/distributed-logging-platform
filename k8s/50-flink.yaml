@@ -1,0 +1,69 @@
+# Flink in application mode: a JobManager Deployment running our job, plus a
+# TaskManager Deployment whose `replicas` is the horizontal scale knob.
+#
+# SCALING STORY: parallelism is bounded by total task slots = (taskmanager
+# replicas) × (numberOfTaskSlots). To process more, add TaskManager replicas
+# (more slots) AND ensure the Kafka `logs` topic has >= that many partitions
+# (a partition can be read by at most one consumer subtask). Here: 2 replicas ×
+# 4 slots = 8 slots, topic has 6 partitions, parallelism.default = 6.
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: flink-config, namespace: logging }
+data:
+  FLINK_PROPERTIES: |
+    jobmanager.rpc.address: flink-jobmanager
+    taskmanager.numberOfTaskSlots: 4
+    parallelism.default: 6
+    state.backend: hashmap
+    pekko.ask.timeout: 60s
+    s3.endpoint: http://minio:9000
+    s3.path.style.access: true
+    s3.access-key: minioadmin
+    s3.secret-key: minioadmin
+  KAFKA_BOOTSTRAP: "kafka-0.kafka:9092"
+  ES_HOST: "elasticsearch"
+  TIMESCALE_URL: "jdbc:postgresql://timescaledb:5432/metrics"
+  PARQUET_PATH: "s3a://logs-archive/enriched"
+  CHECKPOINT_DIR: "s3://flink-checkpoints/checkpoints"
+---
+apiVersion: v1
+kind: Service
+metadata: { name: flink-jobmanager, namespace: logging }
+spec:
+  selector: { app: flink-jobmanager }
+  ports:
+    - { name: rpc, port: 6123 }
+    - { name: ui, port: 8081 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: flink-jobmanager, namespace: logging }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: flink-jobmanager } }
+  template:
+    metadata: { labels: { app: flink-jobmanager } }
+    spec:
+      containers:
+        - name: jobmanager
+          image: flink-job:latest
+          imagePullPolicy: IfNotPresent
+          args: ["standalone-job", "--job-classname", "com.observability.StreamingJob"]
+          ports: [ { containerPort: 6123 }, { containerPort: 8081 } ]
+          envFrom: [ { configMapRef: { name: flink-config } } ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: flink-taskmanager, namespace: logging }
+spec:
+  replicas: 2                       # <-- scale knob: more slots = more parallelism
+  selector: { matchLabels: { app: flink-taskmanager } }
+  template:
+    metadata: { labels: { app: flink-taskmanager } }
+    spec:
+      containers:
+        - name: taskmanager
+          image: flink-job:latest
+          imagePullPolicy: IfNotPresent
+          args: ["taskmanager"]
+          envFrom: [ { configMapRef: { name: flink-config } } ]

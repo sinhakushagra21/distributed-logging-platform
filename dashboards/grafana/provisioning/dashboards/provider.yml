@@ -1,0 +1,13 @@
+# Load dashboard JSON files from /etc/grafana/dashboards at startup.
+apiVersion: 1
+providers:
+  - name: observability
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: false
+    editable: true
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/dashboards
+      foldersFromFilesStructure: false

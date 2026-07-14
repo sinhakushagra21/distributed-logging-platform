@@ -1,0 +1,58 @@
+# Grafana + control-api (the live UI). Kibana omitted here for brevity — add it
+# analogously to Elasticsearch if you want the Kibana demo in-cluster.
+apiVersion: v1
+kind: Service
+metadata: { name: grafana, namespace: logging }
+spec:
+  type: NodePort
+  selector: { app: grafana }
+  ports: [ { port: 3000, targetPort: 3000, nodePort: 30300 } ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: grafana, namespace: logging }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: grafana } }
+  template:
+    metadata: { labels: { app: grafana } }
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.1.0
+          env:
+            - { name: GF_SECURITY_ADMIN_USER, value: admin }
+            - { name: GF_SECURITY_ADMIN_PASSWORD, value: admin }
+          ports: [ { containerPort: 3000 } ]
+          # In-cluster, mount provisioning via a ConfigMap (omitted); or add the
+          # TimescaleDB datasource + dashboards through the UI.
+---
+apiVersion: v1
+kind: Service
+metadata: { name: control-api, namespace: logging }
+spec:
+  type: NodePort
+  selector: { app: control-api }
+  ports: [ { port: 8090, targetPort: 8090, nodePort: 30890 } ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: control-api, namespace: logging }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: control-api } }
+  template:
+    metadata: { labels: { app: control-api } }
+    spec:
+      containers:
+        - name: control-api
+          image: control-api:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: KAFKA_BOOTSTRAP, value: "kafka-0.kafka:9092" }
+            - { name: FLINK_URL, value: "http://flink-jobmanager:8081" }
+            - { name: ES_URL, value: "http://elasticsearch:9200" }
+            - { name: TIMESCALE_DSN, value: "host=timescaledb port=5432 dbname=metrics user=postgres password=postgres" }
+            - { name: LOADGEN_URL, value: "http://loadgen:9100" }
+            - { name: SERVICE_URLS, value: "http://api-gateway:8000,http://auth:8001,http://trip:8002,http://payments:8003" }
+          ports: [ { containerPort: 8090 } ]

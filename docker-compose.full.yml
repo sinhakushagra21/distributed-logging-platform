@@ -1,0 +1,63 @@
+# Scale-profile override for the throughput demo. Use on a machine with plenty
+# of RAM (>= ~12-16 GB free for Docker):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.full.yml up -d --build
+#
+# It raises the knobs that matter for scale: more Kafka partitions (=> more
+# consumer parallelism), higher Flink parallelism + a second TaskManager (=>
+# more task slots), and larger heaps. Kafka partition count and Flink
+# parallelism are the two levers to scale this pipeline horizontally.
+services:
+  kafka:
+    environment:
+      KAFKA_NUM_PARTITIONS: 6            # more partitions => more parallel consumers
+      KAFKA_HEAP_OPTS: "-Xms1g -Xmx1g"
+
+  # Recreate the 'logs' topic with 6 partitions on a fresh volume.
+  kafka-init:
+    command:
+      - |
+        set -e; BS=kafka:9092
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --create --if-not-exists \
+          --topic logs --partitions 6 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --create --if-not-exists \
+          --topic logs.dlq --partitions 2 --replication-factor 1
+        echo "topics:"; /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --list
+
+  elasticsearch:
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+
+  flink-jobmanager:
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+        parallelism.default: 6
+        state.backend: hashmap
+        pekko.ask.timeout: 60s
+        jobmanager.memory.process.size: 1600m
+        taskmanager.memory.process.size: 2560m
+        s3.endpoint: http://minio:9000
+        s3.path.style.access: true
+        s3.access-key: minioadmin
+        s3.secret-key: minioadmin
+
+  flink-taskmanager:
+    # Two TaskManagers × 4 slots = 8 slots, enough for parallelism.default=6.
+    deploy:
+      replicas: 2
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+        parallelism.default: 6
+        state.backend: hashmap
+        pekko.ask.timeout: 60s
+        taskmanager.memory.process.size: 2560m
+        s3.endpoint: http://minio:9000
+        s3.path.style.access: true
+        s3.access-key: minioadmin
+        s3.secret-key: minioadmin

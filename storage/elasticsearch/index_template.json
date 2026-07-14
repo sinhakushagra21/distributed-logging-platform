@@ -1,0 +1,30 @@
+{
+  "index_patterns": ["logs-*"],
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0,
+      "refresh_interval": "2s"
+    },
+    "mappings": {
+      "properties": {
+        "@timestamp":        { "type": "date" },
+        "event_time_ms":     { "type": "long" },
+        "service_name":      { "type": "keyword" },
+        "level":             { "type": "keyword" },
+        "correlation_id":    { "type": "keyword" },
+        "message":           { "type": "text",
+                               "fields": { "raw": { "type": "keyword", "ignore_above": 256 } } },
+        "status_code":       { "type": "integer" },
+        "status_class":      { "type": "keyword" },
+        "latency_ms":        { "type": "double" },
+        "region":            { "type": "keyword" },
+        "endpoint":          { "type": "keyword" },
+        "user_id":           { "type": "keyword" },
+        "host":              { "type": "keyword" },
+        "processing_ts_ms":  { "type": "long" },
+        "extra":             { "type": "object", "enabled": true }
+      }
+    }
+  }
+}

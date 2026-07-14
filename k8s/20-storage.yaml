@@ -1,0 +1,106 @@
+# Storage tier: Elasticsearch, TimescaleDB, MinIO.
+# Single-replica Deployments with PVCs — enough to demonstrate; a production
+# cluster would use the ECK operator / a Postgres operator / distributed MinIO.
+---
+apiVersion: v1
+kind: Service
+metadata: { name: elasticsearch, namespace: logging }
+spec:
+  selector: { app: elasticsearch }
+  ports: [ { port: 9200, targetPort: 9200 } ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: elasticsearch, namespace: logging }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: elasticsearch } }
+  template:
+    metadata: { labels: { app: elasticsearch } }
+    spec:
+      containers:
+        - name: elasticsearch
+          image: docker.elastic.co/elasticsearch/elasticsearch:7.17.18
+          env:
+            - { name: discovery.type, value: single-node }
+            - { name: xpack.security.enabled, value: "false" }
+            - { name: ES_JAVA_OPTS, value: "-Xms1g -Xmx1g" }
+          ports: [ { containerPort: 9200 } ]
+          resources: { requests: { memory: "1500Mi" }, limits: { memory: "2Gi" } }
+          readinessProbe:
+            httpGet: { path: /_cluster/health, port: 9200 }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: timescale-init, namespace: logging }
+data:
+  init.sql: |
+    CREATE EXTENSION IF NOT EXISTS timescaledb;
+    CREATE TABLE IF NOT EXISTS service_metrics (
+      window_start TIMESTAMPTZ NOT NULL, window_end TIMESTAMPTZ NOT NULL,
+      service_name TEXT NOT NULL, window_type TEXT NOT NULL,
+      count BIGINT, error_count BIGINT, warn_count BIGINT,
+      error_rate DOUBLE PRECISION, avg_latency_ms DOUBLE PRECISION, max_latency_ms DOUBLE PRECISION,
+      PRIMARY KEY (service_name, window_type, window_start));
+    SELECT create_hypertable('service_metrics','window_start', if_not_exists => TRUE);
+---
+apiVersion: v1
+kind: Service
+metadata: { name: timescaledb, namespace: logging }
+spec:
+  selector: { app: timescaledb }
+  ports: [ { port: 5432, targetPort: 5432 } ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: timescaledb, namespace: logging }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: timescaledb } }
+  template:
+    metadata: { labels: { app: timescaledb } }
+    spec:
+      containers:
+        - name: timescaledb
+          image: timescale/timescaledb:2.15.3-pg16
+          env:
+            - { name: POSTGRES_DB, value: metrics }
+            - { name: POSTGRES_PASSWORD, value: postgres }
+          ports: [ { containerPort: 5432 } ]
+          volumeMounts:
+            - { name: init, mountPath: /docker-entrypoint-initdb.d }
+          readinessProbe:
+            exec: { command: ["pg_isready","-U","postgres","-d","metrics"] }
+            initialDelaySeconds: 10
+      volumes:
+        - name: init
+          configMap: { name: timescale-init }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: minio, namespace: logging }
+spec:
+  selector: { app: minio }
+  ports:
+    - { name: s3, port: 9000, targetPort: 9000 }
+    - { name: console, port: 9001, targetPort: 9001 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: minio, namespace: logging }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: minio } }
+  template:
+    metadata: { labels: { app: minio } }
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:latest
+          args: ["server", "/data", "--console-address", ":9001"]
+          env:
+            - { name: MINIO_ROOT_USER, value: minioadmin }
+            - { name: MINIO_ROOT_PASSWORD, value: minioadmin }
+          ports: [ { containerPort: 9000 }, { containerPort: 9001 } ]

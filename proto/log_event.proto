@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+// Shared wire schema for a single log event flowing through the pipeline:
+//   services (JSON) -> Fluent Bit -> log-shipper (encodes THIS) -> Kafka
+//   -> Flink (decodes THIS) -> Elasticsearch / TimescaleDB / S3
+//
+// Both the Python log-shipper and the Java Flink job generate code from this
+// one file, so producer and consumer can never silently disagree on the shape
+// of the data. That shared, versioned contract is the main reason we use
+// Protobuf instead of ad-hoc JSON.
+package logging;
+
+// Java code-gen options (used by the Stage 3 Flink job).
+option java_package = "com.observability.proto";
+option java_outer_classname = "LogEventProto";
+option java_multiple_files = true;
+
+message LogEvent {
+  // ---- core schema (present on every record) ----
+  string timestamp      = 1;  // ISO8601, UTC, e.g. 2026-07-14T06:33:28.370094Z
+  string service_name   = 2;  // api-gateway | auth | trip | payments
+  string level          = 3;  // DEBUG | INFO | WARN | ERROR
+  string correlation_id = 4;  // the tracing thread: same value across services
+  string message        = 5;  // human-readable log message
+
+  // ---- common contextual fields (typed for cheap querying downstream) ----
+  int32  status_code    = 6;
+  double latency_ms     = 7;
+  string region         = 8;
+  string endpoint       = 9;
+  string user_id        = 10;
+
+  // ---- metadata attached by Fluent Bit / the shipper ----
+  string host           = 11;  // collector host
+  string collector      = 12;  // e.g. "fluent-bit"
+  int64  ingest_ts_ms   = 13;  // epoch ms when the shipper produced to Kafka
+
+  // ---- everything else (service-specific fields like trip_id, driver_id) ----
+  // Kept as a string map so new fields don't require a schema change to pass
+  // through; Flink can promote any of these to typed columns later.
+  map<string, string> extra = 14;
+}

@@ -1,0 +1,29 @@
+# Memory-trimmed override for a metrics-only smoke test on a small Docker VM
+# (~3.8 GB). Runs the REAL Flink pipeline end to end but with only the
+# TimescaleDB sink enabled, so we can skip the heavy Elasticsearch + MinIO
+# containers. Use:
+#   docker compose -f docker-compose.yml -f docker-compose.smoke.yml up -d \
+#     kafka kafka-init timescaledb auth trip payments api-gateway \
+#     fluent-bit log-shipper flink-jobmanager flink-taskmanager
+services:
+  kafka:
+    environment:
+      KAFKA_HEAP_OPTS: "-Xms512m -Xmx512m"
+  flink-jobmanager:
+    environment:
+      ENABLE_ES: "false"
+      ENABLE_PARQUET: "false"
+      ENABLE_TIMESCALE: "true"
+      # Flink needs no ES/MinIO now, so drop those startup deps for the smoke run.
+    depends_on:
+      kafka:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+  flink-taskmanager:
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 2
+        parallelism.default: 2
+        state.backend: hashmap

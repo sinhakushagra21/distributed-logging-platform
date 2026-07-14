@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Distributed Logging — Live Control</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#0d1117; --panel:#161b22; --line:#30363d; --fg:#e6edf3; --muted:#8b949e;
+          --accent:#58a6ff; --ok:#3fb950; --warn:#d29922; --err:#f85149; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.4 -apple-system,Segoe UI,Roboto,sans-serif; }
+  h1 { font-size:18px; margin:0; } h2 { font-size:13px; color:var(--muted); margin:0 0 8px; text-transform:uppercase; letter-spacing:.04em; }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:16px; }
+  .badge { font-size:12px; padding:3px 8px; border-radius:10px; border:1px solid var(--line); color:var(--muted); }
+  .wrap { padding:16px 20px; display:grid; gap:16px; grid-template-columns: 1fr 1fr; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .full { grid-column:1 / -1; }
+  .controls { display:flex; gap:24px; align-items:center; flex-wrap:wrap; }
+  .control label { display:block; color:var(--muted); font-size:12px; margin-bottom:4px; }
+  input[type=range] { width:260px; }
+  button { background:#21262d; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:8px 14px; cursor:pointer; font-size:13px; }
+  button:hover { border-color:var(--accent); }
+  button.active { background:var(--err); border-color:var(--err); }
+  .stat { display:inline-block; margin-right:22px; } .stat b { font-size:20px; } .stat span { color:var(--muted); font-size:12px; display:block; }
+  canvas { max-height:200px; }
+  table { width:100%; border-collapse:collapse; font-size:12px; } td,th { text-align:left; padding:3px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  .lvl-ERROR{color:var(--err);} .lvl-WARN{color:var(--warn);} .lvl-INFO{color:var(--ok);} .lvl-DEBUG{color:var(--muted);}
+  /* flow diagram */
+  .flow { display:flex; align-items:center; justify-content:space-between; gap:6px; font-size:11px; }
+  .node { background:#21262d; border:1px solid var(--line); border-radius:8px; padding:10px 8px; text-align:center; min-width:78px; transition:border-color .3s,box-shadow .3s; }
+  .node.hot { border-color:var(--accent); box-shadow:0 0 12px rgba(88,166,255,.5); }
+  .node .n { font-weight:600; } .node .v { color:var(--accent); font-size:12px; margin-top:3px; }
+  .arrow { color:var(--muted); font-size:18px; }
+  .sinks { display:flex; flex-direction:column; gap:4px; }
+  #traceOut { margin-top:10px; max-height:220px; overflow:auto; }
+  code { color:var(--accent); }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🛰️ Distributed Logging &amp; Observability — Live Control</h1>
+  <span id="conn" class="badge">connecting…</span>
+  <span id="jobstate" class="badge">flink: —</span>
+</header>
+
+<div class="wrap">
+  <!-- CONTROLS -->
+  <div class="panel full">
+    <h2>Controls</h2>
+    <div class="controls">
+      <div class="control">
+        <label>Load generator rate: <b id="rpsLabel">—</b> rps</label>
+        <input type="range" id="rps" min="0" max="2000" step="50" value="100"/>
+      </div>
+      <div class="control">
+        <label>Spike</label>
+        <button id="burstBtn">⚡ Burst ×6 (15s)</button>
+      </div>
+      <div class="control">
+        <label>Fault injection</label>
+        <button id="errBtn">🔥 Inject errors</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- FLOW DIAGRAM -->
+  <div class="panel full">
+    <h2>Pipeline flow (live)</h2>
+    <div class="flow">
+      <div class="node" id="n-svc"><div class="n">Services</div><div class="v" id="v-svc">—</div></div>
+      <span class="arrow">→</span>
+      <div class="node" id="n-fb"><div class="n">Fluent Bit</div><div class="v">tail+mask</div></div>
+      <span class="arrow">→</span>
+      <div class="node" id="n-kafka"><div class="n">Kafka</div><div class="v" id="v-kafka">— /s</div></div>
+      <span class="arrow">→</span>
+      <div class="node" id="n-flink"><div class="n">Flink</div><div class="v" id="v-flink">— /s</div></div>
+      <span class="arrow">→</span>
+      <div class="sinks">
+        <div class="node" id="n-es"><div class="n">Elasticsearch</div><div class="v" id="v-es">— docs</div></div>
+        <div class="node"><div class="n">TimescaleDB</div><div class="v" id="v-ts">metrics</div></div>
+        <div class="node"><div class="n">S3/Parquet</div><div class="v">archive</div></div>
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <span class="stat"><b id="s-ingest">—</b><span>ingest logs/s</span></span>
+      <span class="stat"><b id="s-lag">—</b><span>Kafka consumer lag</span></span>
+      <span class="stat"><b id="s-flink">—</b><span>Flink records/s</span></span>
+      <span class="stat"><b id="s-slots">—</b><span>task slots (used/total)</span></span>
+      <span class="stat"><b id="s-latency">—</b><span>processing lag ms</span></span>
+    </div>
+  </div>
+
+  <div class="panel"><h2>Ingestion vs Flink throughput (/s)</h2><canvas id="cThroughput"></canvas></div>
+  <div class="panel"><h2>Kafka consumer lag (backlog)</h2><canvas id="cLag"></canvas></div>
+  <div class="panel"><h2>Per-service error rate (%)</h2><canvas id="cErr"></canvas></div>
+  <div class="panel"><h2>Processing lag (ms)</h2><canvas id="cLat"></canvas></div>
+
+  <!-- TRACE -->
+  <div class="panel full">
+    <h2>Trace a request by correlation_id</h2>
+    <input id="cid" class="mono" placeholder="paste correlation_id…" style="width:340px;padding:7px;background:#0d1117;color:var(--fg);border:1px solid var(--line);border-radius:6px"/>
+    <button id="traceBtn">Trace</button>
+    <span class="badge" id="traceMeta"></span>
+    <div id="traceOut"></div>
+  </div>
+
+  <!-- LOG TAIL -->
+  <div class="panel full">
+    <h2>Live log tail</h2>
+    <table><thead><tr><th>time</th><th>service</th><th>level</th><th>status</th><th>correlation_id</th><th>message</th></tr></thead>
+    <tbody id="tail"></tbody></table>
+  </div>
+</div>
+
+<script>
+const MAX = 60;
+const mkChart = (id, datasets, opts={}) => new Chart(document.getElementById(id), {
+  type:'line',
+  data:{ labels:[], datasets },
+  options:{ animation:false, responsive:true, maintainAspectRatio:false,
+    scales:{ x:{ display:false }, y:{ beginAtZero:true, grid:{color:'#21262d'}, ticks:{color:'#8b949e'} } },
+    plugins:{ legend:{ labels:{ color:'#8b949e', boxWidth:10 } } }, ...opts }
+});
+const C = c=>getComputedStyle(document.documentElement).getPropertyValue(c);
+const chThroughput = mkChart('cThroughput', [
+  { label:'ingest/s', borderColor:C('--accent'), data:[], pointRadius:0, tension:.3 },
+  { label:'flink/s', borderColor:C('--ok'), data:[], pointRadius:0, tension:.3 } ]);
+const chLag = mkChart('cLag', [{ label:'lag', borderColor:C('--warn'), backgroundColor:'rgba(210,153,34,.2)', fill:true, data:[], pointRadius:0, tension:.3 }]);
+const chLat = mkChart('cLat', [{ label:'processing lag ms', borderColor:C('--accent'), data:[], pointRadius:0, tension:.3 }]);
+const errColors = {'api-gateway':'#58a6ff','auth':'#3fb950','trip':'#d29922','payments':'#f85149'};
+const chErr = mkChart('cErr', Object.keys(errColors).map(s=>({label:s,borderColor:errColors[s],data:[],pointRadius:0,tension:.3})));
+
+function push(chart, vals){ const t=new Date().toLocaleTimeString();
+  chart.data.labels.push(t); if(chart.data.labels.length>MAX) chart.data.labels.shift();
+  chart.data.datasets.forEach((d,i)=>{ d.data.push(vals[i]); if(d.data.length>MAX) d.data.shift(); });
+  chart.update('none'); }
+const hot = (id,on)=>document.getElementById(id).classList.toggle('hot',!!on);
+const setTxt = (id,v)=>document.getElementById(id).textContent=v;
+
+// ---- SSE metrics stream ----
+function connect(){
+  const es = new EventSource('/api/stream');
+  es.onopen = ()=>{ document.getElementById('conn').textContent='● live'; document.getElementById('conn').style.color=C('--ok'); };
+  es.onerror = ()=>{ document.getElementById('conn').textContent='● reconnecting'; document.getElementById('conn').style.color=C('--warn'); };
+  es.onmessage = e=>{
+    const m = JSON.parse(e.data);
+    const k=m.kafka||{}, f=m.flink||{}, es_=m.elasticsearch||{}, ts=m.timescale||{};
+    const ingest=k.ingest_rate, lag=k.consumer_lag, fr=f.processing_rate;
+    setTxt('s-ingest', ingest??'—'); setTxt('s-lag', lag??'—'); setTxt('s-flink', fr??'—');
+    setTxt('s-slots', (f.slots_total!=null)?`${(f.slots_total-(f.slots_available||0))}/${f.slots_total}`:'—');
+    setTxt('s-latency', es_.processing_lag_ms??'—');
+    setTxt('v-kafka', (ingest??'—')+' /s'); setTxt('v-flink', (fr??'—')+' /s');
+    setTxt('v-es', (es_.indexed_docs??'—')+' docs');
+    document.getElementById('jobstate').textContent = 'flink: '+(f.job_state||'—');
+    hot('n-kafka', ingest>0); hot('n-flink', fr>0); hot('n-svc', ingest>0);
+    hot('n-es', es_.indexed_docs>0);
+    push(chThroughput, [ingest??null, fr??null]);
+    push(chLag, [lag??null]);
+    push(chLat, [es_.processing_lag_ms??null]);
+    const byS = Object.fromEntries((ts.per_service||[]).map(r=>[r.service, r.error_rate*100]));
+    push(chErr, Object.keys(errColors).map(s=>byS[s]??null));
+  };
+}
+connect();
+
+// ---- controls ----
+const rps=document.getElementById('rps'), rpsLabel=document.getElementById('rpsLabel');
+rpsLabel.textContent=rps.value;
+let rpsTimer=null;
+rps.oninput=()=>{ rpsLabel.textContent=rps.value;
+  clearTimeout(rpsTimer); rpsTimer=setTimeout(()=>fetch('/api/rps?value='+rps.value,{method:'POST'}),150); };
+document.getElementById('burstBtn').onclick=()=>fetch('/api/burst?multiplier=6&duration_s=15',{method:'POST'});
+let errOn=false;
+document.getElementById('errBtn').onclick=function(){ errOn=!errOn; this.classList.toggle('active',errOn);
+  fetch('/api/inject-errors?enabled='+errOn+'&duration_s=120',{method:'POST'}); };
+// init slider from backend
+fetch('/api/rps').then(r=>r.json()).then(d=>{ if(d.target_rps!=null){ rps.value=d.target_rps; rpsLabel.textContent=d.target_rps; }}).catch(()=>{});
+
+// ---- log tail ----
+async function tail(){ try{ const rows=await (await fetch('/api/logs/tail?size=25')).json();
+  if(!Array.isArray(rows)) return;
+  document.getElementById('tail').innerHTML = rows.map(r=>`<tr>
+    <td class="mono">${(r['@timestamp']||'').slice(11,23)}</td><td>${r.service_name||''}</td>
+    <td class="lvl-${r.level}">${r.level||''}</td><td>${r.status_code||''}</td>
+    <td class="mono" style="cursor:pointer" onclick="doTrace('${r.correlation_id}')">${(r.correlation_id||'').slice(0,8)}</td>
+    <td>${(r.message||'').slice(0,60)}</td></tr>`).join('');
+ }catch(e){} }
+setInterval(tail, 3000); tail();
+
+// ---- trace ----
+window.doTrace=async function(cid){ document.getElementById('cid').value=cid; trace(); };
+async function trace(){ const cid=document.getElementById('cid').value.trim(); if(!cid) return;
+  const d=await (await fetch('/api/trace/'+encodeURIComponent(cid))).json();
+  document.getElementById('traceMeta').textContent = d.span_count!=null ? `${d.span_count} events across ${(d.services||[]).length} services` : (d.error||'');
+  document.getElementById('traceOut').innerHTML = '<table><thead><tr><th>#</th><th>service</th><th>level</th><th>status</th><th>lat ms</th><th>message</th></tr></thead><tbody>'
+    + (d.events||[]).map((e,i)=>`<tr><td>${i+1}</td><td>${e.service_name}</td><td class="lvl-${e.level}">${e.level}</td><td>${e.status_code||''}</td><td>${e.latency_ms||''}</td><td>${e.message||''}</td></tr>`).join('')
+    + '</tbody></table>';
+}
+document.getElementById('traceBtn').onclick=trace;
+</script>
+</body>
+</html>

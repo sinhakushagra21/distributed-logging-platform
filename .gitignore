@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Runtime log artifacts (services write here; Fluent Bit tails them in Stage 2)
+services/logs/
+logs/
+*.log
+*.out
+
+# Build output
+flink-job/target/
+
+# OS
+.DS_Store

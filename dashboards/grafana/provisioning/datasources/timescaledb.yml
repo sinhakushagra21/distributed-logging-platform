@@ -1,0 +1,18 @@
+# Auto-provisioned Postgres/TimescaleDB datasource for Grafana.
+apiVersion: 1
+datasources:
+  - name: TimescaleDB
+    uid: timescaledb
+    type: postgres
+    access: proxy
+    url: timescaledb:5432
+    user: postgres
+    isDefault: true
+    jsonData:
+      database: metrics
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: true
+    secureJsonData:
+      password: postgres
+    editable: true

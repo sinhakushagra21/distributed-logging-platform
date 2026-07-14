@@ -1,0 +1,26 @@
+# log-shipper: receives Fluent Bit batches, encodes Protobuf, produces to Kafka.
+# Stateless -> a plain Deployment; scale `replicas` to add producer throughput.
+apiVersion: v1
+kind: Service
+metadata: { name: log-shipper, namespace: logging }
+spec:
+  selector: { app: log-shipper }
+  ports: [ { port: 8080, targetPort: 8080 } ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: log-shipper, namespace: logging }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: log-shipper } }
+  template:
+    metadata: { labels: { app: log-shipper } }
+    spec:
+      containers:
+        - name: log-shipper
+          image: log-shipper:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: KAFKA_BOOTSTRAP, value: "kafka-0.kafka:9092" }
+            - { name: KAFKA_TOPIC, value: "logs" }
+          ports: [ { containerPort: 8080 } ]

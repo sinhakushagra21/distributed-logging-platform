@@ -1,0 +1,56 @@
+# Provisioned unified-alerting rule: fire when a service's error rate stays
+# above 2% for 5 minutes (the alert the Stage 7 "inject errors" demo triggers).
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: error_rate_group
+    folder: Observability Alerts
+    interval: 1m
+    rules:
+      - uid: high-error-rate
+        title: High error rate (>2% for 5m)
+        condition: C
+        for: 5m
+        noDataState: NoData
+        execErrState: Error
+        annotations:
+          summary: "A service error rate has been above 2% for 5 minutes"
+        labels:
+          severity: warning
+        data:
+          # A: pull the latest per-service tumbling error rate (%) over 10 min.
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: timescaledb
+            model:
+              refId: A
+              format: time_series
+              datasource: { type: postgres, uid: timescaledb }
+              rawSql: >
+                SELECT window_start AS "time", service_name AS metric,
+                       error_rate*100 AS value
+                FROM service_metrics
+                WHERE window_type='tumbling_1m'
+                  AND window_start > now() - interval '10 minutes'
+                ORDER BY 1
+          # B: reduce each series to its most recent value.
+          - refId: B
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              datasource: { type: __expr__, uid: __expr__ }
+          # C: threshold — alert if latest error rate > 2 (%).
+          - refId: C
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              datasource: { type: __expr__, uid: __expr__ }
+              conditions:
+                - evaluator: { type: gt, params: [2] }
