@@ -197,14 +197,21 @@ async def get_rps():
 @app.post("/api/rps")
 async def set_rps(value: float):
     async with httpx.AsyncClient() as c:
-        return (await c.post(f"{LOADGEN_URL}/rps", params={"value": value}, timeout=4)).json()
+        try:
+            return (await c.post(f"{LOADGEN_URL}/rps", params={"value": value}, timeout=4)).json()
+        except Exception as e:
+            # loadgen may be starting up or disabled — don't 500 the UI.
+            return {"error": str(e)[:120], "hint": "is the loadgen container up?"}
 
 
 @app.post("/api/burst")
 async def burst(multiplier: float = 6.0, duration_s: float = 15.0):
     async with httpx.AsyncClient() as c:
-        return (await c.post(f"{LOADGEN_URL}/burst",
-                params={"multiplier": multiplier, "duration_s": duration_s}, timeout=4)).json()
+        try:
+            return (await c.post(f"{LOADGEN_URL}/burst",
+                    params={"multiplier": multiplier, "duration_s": duration_s}, timeout=4)).json()
+        except Exception as e:
+            return {"error": str(e)[:120], "hint": "is the loadgen container up?"}
 
 
 @app.post("/api/inject-errors")
