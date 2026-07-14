@@ -1,7 +1,7 @@
 package com.observability.parse;
 
 import com.observability.model.EnrichedLog;
-import com.observability.proto.LogEventOuterClass.LogEvent;
+import com.observability.proto.LogEvent;
 import com.google.protobuf.InvalidProtocolBufferException;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
